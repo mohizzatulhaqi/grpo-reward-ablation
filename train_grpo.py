@@ -15,6 +15,11 @@ API note: written against trl>=0.12 (GRPOConfig/GRPOTrainer, `beta` = KL coeff,
 `processing_class` for the tokenizer). If your TRL version differs, adjust the
 config kwargs — the reward/data plumbing stays the same.
 """
+import os
+os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")  # 4-bit bitsandbytes breaks under
+# multi-GPU DataParallel (e.g. Kaggle's T4 x2). Pin to one GPU unless explicitly
+# overridden (set CUDA_VISIBLE_DEVICES yourself + use accelerate launch for real DDP).
+
 import argparse
 import dataclasses
 import random

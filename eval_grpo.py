@@ -17,6 +17,8 @@ import argparse
 import json
 import os
 
+os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")  # pin to one GPU (matches training)
+
 import torch
 from datasets import load_dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer
