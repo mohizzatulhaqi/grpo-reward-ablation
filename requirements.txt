@@ -1,0 +1,18 @@
+# Core training/eval (GPU box)
+torch>=2.3
+transformers>=4.45
+trl>=0.12
+datasets>=2.20
+accelerate>=0.34
+
+# QLoRA / free-tier mode (4-bit base + LoRA adapter)
+peft>=0.11
+bitsandbytes>=0.43
+
+# Analysis + tests (runs anywhere, no GPU)
+scipy>=1.11
+numpy>=1.26
+pytest>=8.0
+
+# Optional: faster evaluation sampling
+# vllm>=0.6
