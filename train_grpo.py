@@ -16,6 +16,7 @@ API note: written against trl>=0.12 (GRPOConfig/GRPOTrainer, `beta` = KL coeff,
 config kwargs — the reward/data plumbing stays the same.
 """
 import argparse
+import dataclasses
 import random
 
 import numpy as np
@@ -34,6 +35,21 @@ def set_seed(s):
     torch.manual_seed(s)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(s)
+
+
+def _supported_kwargs(config_cls, kwargs):
+    """Drop kwargs the installed TRL/GRPOConfig version doesn't accept.
+
+    TRL's config API drifts between releases (e.g. max_prompt_length was removed).
+    Rather than pin a version, we keep only fields the installed GRPOConfig
+    actually declares (inherited TrainingArguments fields included) and warn about
+    the rest. Keeps this script runnable across TRL versions on Kaggle/Colab.
+    """
+    valid = {f.name for f in dataclasses.fields(config_cls)}
+    dropped = sorted(k for k in kwargs if k not in valid)
+    if dropped:
+        print(f"[warn] this TRL's GRPOConfig ignores unsupported args: {dropped}")
+    return {k: v for k, v in kwargs.items() if k in valid}
 
 
 def build_policy(args):
@@ -121,7 +137,7 @@ def main():
 
     model, tok, peft_config = build_policy(args)
 
-    grpo_cfg = GRPOConfig(
+    cfg_kwargs = dict(
         output_dir=out,
         seed=args.seed,
         learning_rate=args.lr,
@@ -141,6 +157,7 @@ def main():
         bf16=True,
         report_to="none",
     )
+    grpo_cfg = GRPOConfig(**_supported_kwargs(GRPOConfig, cfg_kwargs))
 
     trainer = GRPOTrainer(
         model=model,
