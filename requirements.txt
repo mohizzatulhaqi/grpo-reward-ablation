@@ -14,5 +14,8 @@ scipy>=1.11
 numpy>=1.26
 pytest>=8.0
 
-# Optional: faster evaluation sampling
+# Optional: vLLM-accelerated generation for training (--use-vllm) and eval.
+# Heavy dep with strict CUDA needs; install separately on the GPU box if wanted:
+#   pip install vllm
+# The code auto-falls back to standard generation if it's missing or fails.
 # vllm>=0.6

@@ -23,6 +23,7 @@ os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")  # 4-bit bitsandbytes breaks 
 import argparse
 import dataclasses
 import random
+import time
 
 import numpy as np
 import torch
@@ -105,6 +106,59 @@ def build_policy(args):
     return model, tok, peft_config
 
 
+def run_training(args, use_vllm, out):
+    """Build config + trainer and train. Factored out so the vLLM path can fall
+    back to standard generation on failure with a clean, fresh rebuild."""
+    cfg = VARIANTS[args.variant]
+    reward_funcs, reward_weights = build_reward_funcs(cfg)
+    tag = "  | vLLM generation" if use_vllm else ""
+    print(f"[{args.variant}] rewards={cfg['rewards']} weights={reward_weights}{tag}")
+
+    ds = load_from_disk(args.data)
+    model, tok, peft_config = build_policy(args)
+
+    cfg_kwargs = dict(
+        output_dir=out,
+        seed=args.seed,
+        learning_rate=args.lr,
+        beta=args.beta,
+        num_generations=args.num_generations,
+        temperature=args.temperature,
+        max_completion_length=args.max_completion_length,
+        max_prompt_length=args.max_prompt_length,
+        per_device_train_batch_size=args.per_device_batch,
+        gradient_accumulation_steps=args.grad_accum,
+        max_steps=args.max_steps,
+        logging_steps=10,
+        save_steps=args.max_steps,
+        reward_weights=reward_weights,
+        gradient_checkpointing=args.gradient_checkpointing,
+        gradient_checkpointing_kwargs={"use_reentrant": False},
+        bf16=True,
+        report_to="none",
+    )
+    if use_vllm:
+        # colocate: vLLM shares the single GPU with training, so keep its memory
+        # share small to leave room for the 4-bit model + LoRA + activations.
+        cfg_kwargs.update(
+            use_vllm=True,
+            vllm_mode="colocate",
+            vllm_gpu_memory_utilization=args.vllm_gpu_mem,
+        )
+    grpo_cfg = GRPOConfig(**_supported_kwargs(GRPOConfig, cfg_kwargs))
+
+    trainer = GRPOTrainer(
+        model=model,
+        processing_class=tok,
+        reward_funcs=reward_funcs,
+        args=grpo_cfg,
+        train_dataset=ds,
+        peft_config=peft_config,
+    )
+    trainer.train()
+    trainer.save_model(out)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--variant", required=True, choices=list(VARIANTS))
@@ -130,51 +184,30 @@ def main():
     ap.add_argument("--lora-dropout", type=float, default=0.05)
     ap.add_argument("--gradient-checkpointing", action=argparse.BooleanOptionalAction,
                     default=True, help="trade compute for memory (on by default)")
+    # vLLM-accelerated generation (optional; falls back automatically on failure)
+    ap.add_argument("--use-vllm", action="store_true",
+                    help="use vLLM for the GRPO generation phase (much faster if it fits)")
+    ap.add_argument("--vllm-gpu-mem", type=float, default=0.25,
+                    help="vLLM GPU memory share in colocate mode (keep small: training shares the GPU)")
     args = ap.parse_args()
 
     set_seed(args.seed)
     out = args.output or f"runs/{args.variant}_seed{args.seed}"
-    cfg = VARIANTS[args.variant]
-    reward_funcs, reward_weights = build_reward_funcs(cfg)
-    print(f"[{args.variant}] rewards={cfg['rewards']} weights={reward_weights}")
-
-    ds = load_from_disk(args.data)
-
-    model, tok, peft_config = build_policy(args)
-
-    cfg_kwargs = dict(
-        output_dir=out,
-        seed=args.seed,
-        learning_rate=args.lr,
-        beta=args.beta,
-        num_generations=args.num_generations,
-        temperature=args.temperature,
-        max_completion_length=args.max_completion_length,
-        max_prompt_length=args.max_prompt_length,
-        per_device_train_batch_size=args.per_device_batch,
-        gradient_accumulation_steps=args.grad_accum,
-        max_steps=args.max_steps,
-        logging_steps=10,
-        save_steps=args.max_steps,
-        reward_weights=reward_weights,
-        gradient_checkpointing=args.gradient_checkpointing,
-        gradient_checkpointing_kwargs={"use_reentrant": False},
-        bf16=True,
-        report_to="none",
-    )
-    grpo_cfg = GRPOConfig(**_supported_kwargs(GRPOConfig, cfg_kwargs))
-
-    trainer = GRPOTrainer(
-        model=model,
-        processing_class=tok,
-        reward_funcs=reward_funcs,
-        args=grpo_cfg,
-        train_dataset=ds,
-        peft_config=peft_config,
-    )
-    trainer.train()
-    trainer.save_model(out)
-    print(f"Saved checkpoint -> {out}")
+    t0 = time.time()
+    try:
+        run_training(args, use_vllm=args.use_vllm, out=out)
+    except Exception as e:
+        if not args.use_vllm:
+            raise
+        import gc
+        print(f"\n[warn] vLLM path failed: {type(e).__name__}: {e}")
+        print("[warn] retrying with standard generation (slower but reliable)...")
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        run_training(args, use_vllm=False, out=out)
+    mins = (time.time() - t0) / 60.0
+    print(f"Saved checkpoint -> {out}  (wall time: {mins:.1f} min)")
 
 
 if __name__ == "__main__":

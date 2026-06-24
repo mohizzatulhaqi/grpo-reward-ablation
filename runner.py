@@ -68,23 +68,35 @@ def pending_jobs(results_dir, runs_dir, variants=None, seeds=None):
 
 # ----------------------------- CLI -----------------------------
 
-def _train(args, v, s):
+def _train_cmd(args, v, s):
     cmd = [sys.executable, "train_grpo.py", "--variant", v, "--seed", str(s),
            "--model", args.model, "--max-steps", str(args.max_steps),
            "--num-generations", str(args.num_generations)]
     if args.use_qlora:
         cmd.append("--use-qlora")
-    print(f"\n>>> TRAIN {v} seed {s}\n    {' '.join(cmd)}")
-    subprocess.run(cmd, check=True)
+    if getattr(args, "use_vllm", False):
+        cmd += ["--use-vllm", "--vllm-gpu-mem", str(args.vllm_gpu_mem)]
+    return cmd
 
 
-def _eval(args, v, s, dataset):
+def _eval_cmd(args, v, s, dataset):
     ckpt = os.path.join(args.runs, f"{v}_seed{s}")
     cmd = [sys.executable, "eval_grpo.py", "--model", ckpt, "--variant", v,
            "--seed", str(s), "--dataset", dataset,
            "--n-samples", str(args.n_samples), "--out-dir", args.results]
     if args.eval_limit is not None:
         cmd += ["--limit", str(args.eval_limit)]
+    return cmd
+
+
+def _train(args, v, s):
+    cmd = _train_cmd(args, v, s)
+    print(f"\n>>> TRAIN {v} seed {s}\n    {' '.join(cmd)}")
+    subprocess.run(cmd, check=True)
+
+
+def _eval(args, v, s, dataset):
+    cmd = _eval_cmd(args, v, s, dataset)
     print(f"\n>>> EVAL  {v} seed {s} ({dataset})")
     subprocess.run(cmd, check=True)
 
@@ -105,23 +117,32 @@ def cmd_status(args):
 
 def cmd_run(args):
     deadline = time.time() + args.minutes * 60
-    ran = 0
+    durations = []
     while True:
         pend = pending_jobs(args.results, args.runs)
         if not pend:
             print("\nAll jobs complete. Run: python -m analysis.aggregate ...")
             break
         if time.time() >= deadline:
-            print(f"\nTime budget reached after {ran} job(s). "
+            print(f"\nTime budget reached after {len(durations)} job(s) this session. "
                   f"{len(pend)} remaining — re-run next session to continue.")
             break
         v, s, st = pend[0]
+        job_t0 = time.time()
         if st == "pending":
             _train(args, v, s)
         for dataset in DATASETS:
             if not os.path.exists(result_path(args.results, v, s, dataset)):
                 _eval(args, v, s, dataset)
-        ran += 1
+        dt = (time.time() - job_t0) / 60.0
+        durations.append(dt)
+        # rolling projection from THIS session's measured pace
+        remaining = len(pending_jobs(args.results, args.runs))
+        avg = sum(durations) / len(durations)
+        eta_h = remaining * avg / 60.0
+        print(f"\n[timing] {v} seed{s} done in {dt:.1f} min "
+              f"(session avg {avg:.1f} min/job) | {remaining} jobs left "
+              f"| ~{eta_h:.1f} h | ~{eta_h / 30:.1f} weeks at 30 h/week\n")
 
 
 def build_parser():
@@ -142,6 +163,9 @@ def build_parser():
     pr.add_argument("--model", default="Qwen/Qwen2.5-1.5B-Instruct")
     pr.add_argument("--use-qlora", action=argparse.BooleanOptionalAction, default=True,
                     help="QLoRA on by default (required for 1.5B on a 16GB T4)")
+    pr.add_argument("--use-vllm", action=argparse.BooleanOptionalAction, default=False,
+                    help="vLLM generation (auto-falls back to standard on failure)")
+    pr.add_argument("--vllm-gpu-mem", type=float, default=0.25)
     pr.add_argument("--max-steps", type=int, default=500)
     pr.add_argument("--num-generations", type=int, default=8)
     pr.add_argument("--n-samples", type=int, default=8)

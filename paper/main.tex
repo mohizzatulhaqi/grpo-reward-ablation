@@ -1,0 +1,399 @@
+% =============================================================================
+%  PAPER SCAFFOLD — GRPO reward-component ablation
+%
+%  HOW TO USE
+%  - Upload this folder to Overleaf (New Project -> Upload Project) and compile
+%    with pdfLaTeX. It compiles as-is with the standard TeX Live on Overleaf.
+%  - Sections 1-4 (Intro, Related Work, Method, Setup) are DRAFTED from your repo
+%    and writable now. Sections 5-6 (Results, Analysis) are SCAFFOLDED with
+%    placeholder tables/numbers to fill once the sweep finishes.
+%  - Find every gap by searching for \todo and \res in this file.
+%  - Before submission: (1) swap \documentclass to your target venue's style
+%    (NeurIPS/ICLR/ACL workshop), (2) VERIFY every \cite entry in references.bib
+%    (arXiv IDs/years are from memory and must be checked), (3) add real figures.
+% =============================================================================
+\documentclass[11pt]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{multirow}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage[numbers]{natbib}
+\usepackage{hyperref}
+\hypersetup{colorlinks=true, linkcolor=blue, citecolor=blue, urlcolor=blue}
+
+% --- authoring helpers: remove (or redefine to {}) before final submission ----
+\newcommand{\todo}[1]{\textcolor{red}{[\textbf{TODO:} #1]}}
+\newcommand{\res}[1]{\textcolor{blue}{\textit{#1}}}   % wrap placeholder numbers
+% -----------------------------------------------------------------------------
+
+\title{\textbf{Which Rewards Matter? A Controlled Component Ablation of\\
+GRPO for Small-Model Mathematical Reasoning}}
+
+\author{
+  Moh. Izzatul Haqi\thanks{Department of Information Technology,
+  Institut Teknologi Sepuluh Nopember (ITS), Surabaya, Indonesia.
+  Correspondence: \texttt{<email>}.} \quad
+  \todo{Advisor name (co-author)} \\
+  \todo{affiliation / lab}
+}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Reinforcement learning with verifiable rewards (RLVR) has become a standard
+recipe for eliciting mathematical reasoning in language models, and the reward
+functions used in practice increasingly combine several signals---answer
+correctness, output format, length control, and partial-credit terms. Yet the
+\emph{marginal} contribution of each component is rarely isolated, and results
+are frequently reported from a single training run, leaving open which signals
+genuinely help and which merely invite reward hacking. We present a controlled,
+multi-seed ablation of the reward function in Group Relative Policy Optimization
+(GRPO) on a small (1.5B-parameter) model trained under a fixed QLoRA budget. We
+decompose the reward into correctness, format, length, and partial-credit
+components and evaluate a cumulative ladder of five variants (A0--A4) on GSM8K
+and on out-of-distribution MATH-500, reporting paired significance tests and
+effect sizes across seeds. We find that \todo{key finding 1 (e.g.\ which
+component yields the largest pass@1 gain)}, that \todo{key finding 2 (e.g.\ a
+component that helps the reward signal but not held-out accuracy)}, and that
+\todo{key finding 3 (e.g.\ the pass@1 vs.\ pass@k pattern)}. Our results
+\todo{one-sentence takeaway}. Code is available at
+\url{https://github.com/mohizzatulhaqi/grpo-reward-ablation}.
+\end{abstract}
+
+% =============================================================================
+\section{Introduction}
+% --- WRITABLE NOW; no results needed ---
+Reinforcement learning has emerged as the dominant approach for improving the
+reasoning ability of large language models (LLMs). Where early work relied on
+learned reward models trained from human preferences~\citep{instructgpt}, recent
+systems for mathematical and programmatic reasoning instead use
+\emph{verifiable} rewards: a rule checks whether the final answer is correct,
+yielding a sparse but unambiguous training signal~\citep{deepseekr1}. Group
+Relative Policy Optimization (GRPO)~\citep{deepseekmath} has made this recipe
+particularly practical by estimating advantages from a group of sampled
+completions, removing the need for a separate value network and substantially
+lowering the cost of RL fine-tuning.
+
+In practice, the reward used to train reasoning models is rarely a single term.
+Implementations commonly add a \emph{format} reward to encourage parseable
+output, a \emph{length} penalty to curb verbosity, and various
+\emph{partial-credit} or process signals intended to densify the otherwise
+sparse, end-of-sequence reward and improve credit
+assignment~\citep{lightman2023}. Each addition is plausible in isolation, but
+the components interact, and a poorly designed term can be exploited: a model
+may learn to satisfy a proxy (e.g.\ produce a well-formatted or short answer)
+without improving its actual accuracy. Despite the centrality of these design
+choices, their individual contributions are seldom measured in a controlled way,
+and the RLVR literature frequently reports single-seed results, making it
+difficult to separate genuine effects from run-to-run variance.
+
+This paper asks a deliberately narrow but practically important question:
+\emph{within a fixed GRPO setup, which reward components actually improve
+reasoning, which are redundant, and which induce reward hacking?} We answer it
+with a cumulative ablation on a small (1.5B) model. Starting from a pure
+correctness reward (RLVR), we add one component at a time---format, length, and
+partial credit---defining five variants A0 through A4. Crucially, we hold the
+optimization budget fixed (the same QLoRA configuration, training steps, and
+group size across variants) so that differences are attributable to the reward,
+and we run each variant across multiple random seeds, reporting paired
+significance tests and effect sizes rather than point estimates.
+
+We deliberately study the small-model, limited-compute regime. This setting is
+both increasingly relevant---efficient post-training of small open models is a
+practical concern---and methodologically convenient: a general-purpose (rather
+than math-specialized) base model leaves headroom for the reward to move
+accuracy, and an out-of-distribution evaluation on MATH-500 tests whether gains
+generalize beyond the training distribution.
+
+\paragraph{Contributions.}
+\begin{itemize}
+  \item We formulate a controlled, cumulative reward ablation (A0--A4) for GRPO
+  and instantiate it with four reward components whose definitions are given in
+  Section~\ref{sec:method}.
+  \item We adopt a statistical protocol---multiple seeds with paired Wilcoxon
+  signed-rank tests and Cliff's $\delta$ effect sizes---that is rarely applied
+  in the RLVR setting, and we report a reward-hacking diagnostic that tracks each
+  component's reward against held-out accuracy.
+  \item Empirically, we find that \todo{summarize 2--3 findings once results are
+  in}. All code and configurations are released for reproducibility.
+\end{itemize}
+
+% =============================================================================
+\section{Related Work}
+% --- WRITABLE NOW ---
+\paragraph{RL for LLM reasoning.}
+Reinforcement learning from human feedback established RL as a tool for aligning
+LLM behaviour~\citep{instructgpt}, typically optimized with Proximal Policy
+Optimization (PPO)~\citep{ppo}. For tasks with checkable answers, RL with
+verifiable rewards replaces the learned reward model with a deterministic
+correctness check, which DeepSeek-R1 used to elicit strong reasoning without
+supervised reasoning traces~\citep{deepseekr1}. GRPO~\citep{deepseekmath}
+simplifies the optimizer by computing group-relative advantages, and is now a
+common choice for reasoning-oriented fine-tuning.
+
+\paragraph{Reward design and credit assignment.}
+Because the verifiable reward is sparse---granted only at the end of a long
+generation---a recurring theme is densifying or shaping it. Process-supervised
+rewards score intermediate steps and can outperform outcome-only supervision on
+mathematical reasoning~\citep{lightman2023}. Format and length terms are widely
+used in practice to stabilize training and control output, but they are proxies
+whose effect on true accuracy is not guaranteed. Our partial-credit component is
+a lightweight, rule-based instance of this densification idea, and our ablation
+is precisely an attempt to quantify when such shaping helps.
+
+\paragraph{Does RL expand or sharpen reasoning?}
+A active debate concerns whether RLVR expands a model's reasoning capability or
+merely concentrates probability on solutions the base model could already
+sample. Evidence that RL improves pass@1 while leaving pass@$k$ (for large $k$)
+largely unchanged suggests a sharpening rather than expansion
+effect~\citep{yue2025}. We connect to this question directly by reporting
+pass@$k$ alongside pass@1 for every variant.
+
+\paragraph{Efficient post-training.}
+Parameter-efficient methods make this study feasible on a single consumer GPU.
+LoRA adapts a frozen model with low-rank updates~\citep{lora}, and
+QLoRA~\citep{qlora} further quantizes the base model to 4-bit, enabling
+RL fine-tuning of billion-parameter models in modest memory. We use QLoRA
+uniformly across all variants; because the comparison is \emph{relative}, a
+fixed parameter-efficient setup does not confound the ablation.
+
+% =============================================================================
+\section{Method}
+\label{sec:method}
+% --- WRITABLE NOW (from repo) ---
+
+\subsection{Background: GRPO}
+For a prompt $q$, GRPO samples a group of $G$ completions
+$\{o_1,\dots,o_G\}$ from the current policy $\pi_{\theta_{\text{old}}}$ and scores
+each with a scalar reward $r_i = R(o_i)$. Advantages are estimated by normalizing
+rewards \emph{within} the group,
+\begin{equation}
+  \hat{A}_i = \frac{r_i - \operatorname{mean}(\{r_1,\dots,r_G\})}
+                   {\operatorname{std}(\{r_1,\dots,r_G\}) + \varepsilon},
+\end{equation}
+which removes the need for a learned value function. The policy is then updated
+with a clipped objective and a KL penalty toward a reference policy
+$\pi_{\text{ref}}$:
+\begin{equation}
+  \mathcal{L}_{\text{GRPO}}(\theta) =
+  -\,\mathbb{E}\!\left[
+  \frac{1}{G}\sum_{i=1}^{G}\frac{1}{|o_i|}\sum_{t=1}^{|o_i|}
+  \min\!\big(\rho_{i,t}\hat{A}_i,\;
+  \operatorname{clip}(\rho_{i,t}, 1-\epsilon, 1+\epsilon)\hat{A}_i\big)
+  - \beta\, \mathrm{D}_{\mathrm{KL}}\!\big(\pi_\theta \,\|\, \pi_{\text{ref}}\big)
+  \right],
+\end{equation}
+where $\rho_{i,t} = \pi_\theta(o_{i,t}\mid q, o_{i,<t}) /
+\pi_{\theta_{\text{old}}}(o_{i,t}\mid q, o_{i,<t})$ is the per-token importance
+ratio.
+
+\subsection{Reward components}
+We decompose the reward into four components, each scaled to $[0,1]$ so that the
+weights below act as clean relative importances. Let $\mathrm{ext}(o)$ denote the
+extracted final answer of completion $o$, $a^\star$ the gold answer, and
+$\mathcal{N}(\cdot)$ the multiset of numbers appearing in a string.
+
+\begin{itemize}
+  \item \textbf{Correctness} (the only term in A0):
+  $r_{\text{corr}}(o) = \mathbb{1}\big[\mathrm{ext}(o) = a^\star\big].$
+  \item \textbf{Format} (structure, independent of value):
+  $r_{\text{fmt}}(o) = \tfrac12\,\mathbb{1}[\text{reasoning block present}]
+  + \tfrac12\,\mathbb{1}[\text{parseable boxed answer present}].$
+  \item \textbf{Length} (soft brevity, budget $T$, hard cut $H$):
+  $r_{\text{len}}(o) = \operatorname{clip}\!\big(1 - \tfrac{\max(0,\,|o|-T)}{H-T},\,0,\,1\big).$
+  \item \textbf{Partial credit} (process signal via intermediate-number overlap
+  with the gold solution $g$):
+  $r_{\text{part}}(o) = \dfrac{|\mathcal{N}(o) \cap \mathcal{N}(g)|}{|\mathcal{N}(g)|}.$
+\end{itemize}
+
+The full reward is a weighted sum $R(o) = \sum_{k} w_k\, r_k(o)$ over the active
+components of a given variant.
+
+\subsection{Ablation design}
+The five variants form a cumulative ladder (Table~\ref{tab:variants}): each adds
+one component to the previous. A0 is pure RLVR and serves as the internal
+baseline against which all others are compared; A4 uses the full reward with
+weights tuned on a single-seed sweep. Algorithm~\ref{alg:grpo} summarizes the
+training loop. The format and correctness terms are intentionally orthogonal---a
+completion can be well-formatted yet wrong---so that ``follows the format'' and
+``gets the right answer'' can be measured separately.
+
+\begin{table}[t]
+  \centering
+  \caption{Reward components active in each ablation variant. Weights are
+  starting values tuned on a single-seed sweep; \res{report final A4 weights}.}
+  \label{tab:variants}
+  \begin{tabular}{lccccl}
+    \toprule
+    Variant & Correctness & Format & Length & Partial & Description \\
+    \midrule
+    A0 & \checkmark &            &            &            & pure RLVR baseline \\
+    A1 & \checkmark & \checkmark &            &            & + format \\
+    A2 & \checkmark & \checkmark & \checkmark &            & + length control \\
+    A3 & \checkmark & \checkmark & \checkmark & \checkmark & + partial credit \\
+    A4 & \checkmark & \checkmark & \checkmark & \checkmark & full, tuned weights \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{algorithm}[t]
+\caption{GRPO training with composite reward (one variant)}
+\label{alg:grpo}
+\begin{algorithmic}[1]
+\Require base policy $\pi_\theta$, dataset $\mathcal{D}$, group size $G$,
+         active components and weights $\{w_k\}$
+\For{each training step}
+  \State sample prompt $q \sim \mathcal{D}$
+  \State sample group $\{o_1,\dots,o_G\} \sim \pi_{\theta_{\text{old}}}(\cdot\mid q)$
+  \For{$i = 1$ to $G$}
+    \State $r_i \gets \sum_k w_k\, r_k(o_i)$ \Comment{composite reward}
+  \EndFor
+  \State $\hat{A}_i \gets (r_i - \operatorname{mean}(r)) / (\operatorname{std}(r) + \varepsilon)$
+  \State update $\theta$ by minimizing $\mathcal{L}_{\text{GRPO}}$
+\EndFor
+\end{algorithmic}
+\end{algorithm}
+
+% =============================================================================
+\section{Experimental Setup}
+\label{sec:setup}
+% --- WRITABLE NOW (from repo) ---
+
+\paragraph{Models.}
+Our primary model is Qwen2.5-1.5B-Instruct~\citep{qwen25}; we deliberately use
+the general instruction-tuned model rather than the math-specialized variant so
+that the reward has room to change accuracy. Pipeline prototyping uses
+Qwen2.5-0.5B-Instruct.
+
+\paragraph{Data.}
+We train on GSM8K~\citep{gsm8k} (7{,}473 grade-school math problems), whose
+answers are trivially verifiable. We evaluate on the GSM8K test split
+(1{,}319 problems) and, as an out-of-distribution test, on
+MATH-500~\citep{lightman2023}, a 500-problem subset of the MATH
+dataset~\citep{mathdataset}.
+
+\paragraph{Training.}
+All variants are trained with GRPO, implemented in the TRL
+library~\citep{trl}, under an identical budget: 4-bit NF4
+quantization with LoRA (rank \res{16}, $\alpha=\res{32}$) applied to all
+attention and MLP projections~\citep{lora,qlora}, group size $G=\res{8}$, KL
+coefficient $\beta=\res{0.04}$, learning rate \res{1e-6}, and \res{N} optimization
+steps, with gradient checkpointing on a single 16\,GB GPU. The KL reference is
+obtained by disabling the LoRA adapter, so no second full-size model is
+instantiated.
+
+\paragraph{Evaluation.}
+For each test problem we sample $n=\res{8}$ completions at temperature
+$\res{0.8}$. We report pass@1 (the unbiased estimator $c/n$ averaged over
+problems) and pass@$n$ using the estimator of \citet{codex}, together with mean
+completion length and the rate of format adherence.
+
+\paragraph{Statistical protocol.}
+Each variant is trained with \res{3} random seeds. We report mean $\pm$ standard
+deviation and compare each variant to A0 with a paired Wilcoxon signed-rank test
+(seeds matched across variants) and Cliff's $\delta$ effect size. We note that
+with \res{3} seeds the smallest attainable paired $p$-value is bounded away from
+conventional thresholds; we therefore foreground effect sizes and treat
+$p$-values as supporting evidence rather than the primary claim.
+
+\paragraph{Reproducibility.}
+Reward functions, the verifier, the statistical analysis, and the resume-capable
+training driver are released, with unit tests covering the components that
+determine the reward signal and the reported metrics.
+
+% =============================================================================
+\section{Results}
+\label{sec:results}
+% --- SCAFFOLD: fill from results/ after the sweep ---
+\todo{Replace the placeholder numbers in Tables~\ref{tab:main} and
+\ref{tab:stats} with aggregated results, and add learning-curve and
+accuracy--length figures.}
+
+\begin{table}[t]
+  \centering
+  \caption{Main results (mean over seeds). \res{All numbers are placeholders.}}
+  \label{tab:main}
+  \begin{tabular}{lccccc}
+    \toprule
+    & \multicolumn{2}{c}{pass@1} & & & \\
+    \cmidrule(lr){2-3}
+    Variant & GSM8K & MATH-500 & pass@$n$ & mean len & format rate \\
+    \midrule
+    A0 & \res{--.-} & \res{--.-} & \res{--.-} & \res{---} & \res{--.-} \\
+    A1 & \res{--.-} & \res{--.-} & \res{--.-} & \res{---} & \res{--.-} \\
+    A2 & \res{--.-} & \res{--.-} & \res{--.-} & \res{---} & \res{--.-} \\
+    A3 & \res{--.-} & \res{--.-} & \res{--.-} & \res{---} & \res{--.-} \\
+    A4 & \res{--.-} & \res{--.-} & \res{--.-} & \res{---} & \res{--.-} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{table}[t]
+  \centering
+  \caption{Comparison to the A0 baseline on GSM8K pass@1: difference, paired
+  Wilcoxon $p$, and Cliff's $\delta$. \res{Placeholders.}}
+  \label{tab:stats}
+  \begin{tabular}{lccc}
+    \toprule
+    Variant & $\Delta$ vs.\ A0 & $p$ (Wilcoxon) & Cliff's $\delta$ \\
+    \midrule
+    A1 & \res{+-.-} & \res{-.--} & \res{+-.--} \\
+    A2 & \res{+-.-} & \res{-.--} & \res{+-.--} \\
+    A3 & \res{+-.-} & \res{-.--} & \res{+-.--} \\
+    A4 & \res{+-.-} & \res{-.--} & \res{+-.--} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\paragraph{Per-component contribution.}
+\todo{Report the cumulative ladder trend and (if run) a leave-one-out on A4 that
+drops each component to measure its marginal effect, especially partial credit.}
+
+\paragraph{Reward hacking.}
+\todo{Present the diagnostic: for each variant, contrast the trajectory of each
+component's reward with held-out accuracy; flag any component whose reward rises
+while accuracy stalls (e.g.\ the length term incentivizing short wrong answers).}
+
+% =============================================================================
+\section{Analysis and Discussion}
+% --- SCAFFOLD ---
+\todo{Structure this around the questions the design was built to answer:}
+\begin{itemize}
+  \item \todo{Which components produced statistically/effect-size-meaningful
+  gains, and which did not?}
+  \item \todo{pass@1 vs.\ pass@$n$: does the reward shaping expand reasoning or
+  sharpen the existing distribution~\citep{yue2025}?}
+  \item \todo{The length-reward trade-off (unconditional vs.\ correctness-gated),
+  if the sub-experiment was run.}
+\end{itemize}
+
+\paragraph{Limitations.}
+This study uses \res{3} seeds, a single model size, a single task family
+(grade-school and competition math), and a parameter-efficient (QLoRA) rather
+than full fine-tuning setup; effect sizes are therefore more reliable than
+$p$-values, and replication at larger scale and with full fine-tuning is left to
+future work. The partial-credit signal is intentionally simple (number overlap)
+and is not a learned process-reward model.
+
+% =============================================================================
+\section{Conclusion}
+% --- SCAFFOLD ---
+We presented a controlled, multi-seed ablation isolating the contribution of
+individual reward components in GRPO for small-model mathematical reasoning.
+\todo{State the headline finding and its practical implication for reward design
+in one or two sentences.}
+
+% =============================================================================
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+\end{document}

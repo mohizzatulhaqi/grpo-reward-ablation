@@ -84,6 +84,19 @@ for a reward ablation as long as it's **identical across all variants** — decl
 LoRA config in your writeup and note full-FT replication as future work. Trade-off: T4
 is slow, so the full sweep is ~5–8 weeks part-time; measure one run first to plan.
 
+**Single-GPU note:** the scripts pin `CUDA_VISIBLE_DEVICES=0` before importing torch,
+because 4-bit bitsandbytes (QLoRA) breaks under the `DataParallel` that HF Trainer
+auto-applies on multi-GPU boxes (e.g. Kaggle's T4 x2). One T4 is plenty for 1.5B QLoRA.
+For real multi-GPU, override the env var and launch with `accelerate launch` (DDP).
+
+**Speeding it up with vLLM (optional).** GRPO step time is dominated by generation, so
+vLLM can cut it sharply. Install it on the box (`pip install vllm`) and add `--use-vllm`
+(to `train_grpo.py` or `runner.py run`). In colocate mode vLLM shares the single GPU with
+training, so memory is tight on 16 GB — tune `--vllm-gpu-mem` (default 0.25). If vLLM
+fails to init or OOMs, the code **automatically falls back** to standard generation and
+keeps going, so it's always safe to try. `runner.py run` also prints a per-job wall time
+and a rolling weeks-remaining projection so you can recalibrate the schedule each session.
+
 ---
 
 ## Metrics

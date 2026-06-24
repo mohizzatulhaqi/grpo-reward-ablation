@@ -64,3 +64,41 @@ def test_pending_jobs_excludes_done(tmp_path):
 
 def test_job_grid_size():
     assert len(runner.job_grid()) == 25
+
+
+# ---------------- command builders ----------------
+
+def _fake_args(**over):
+    import types
+    base = dict(model="Qwen/Qwen2.5-1.5B-Instruct", max_steps=250, num_generations=6,
+                use_qlora=True, use_vllm=False, vllm_gpu_mem=0.25,
+                runs="runs", results="results", n_samples=4, eval_limit=300)
+    base.update(over)
+    return types.SimpleNamespace(**base)
+
+
+def test_train_cmd_includes_qlora_and_core_flags():
+    cmd = runner._train_cmd(_fake_args(), "A3", 1)
+    assert "--use-qlora" in cmd
+    assert "--variant" in cmd and "A3" in cmd
+    assert "--seed" in cmd and "1" in cmd
+    assert "--use-vllm" not in cmd  # off by default in this fake
+
+
+def test_train_cmd_adds_vllm_when_enabled():
+    cmd = runner._train_cmd(_fake_args(use_vllm=True), "A0", 0)
+    assert "--use-vllm" in cmd
+    assert "--vllm-gpu-mem" in cmd and "0.25" in cmd
+
+
+def test_eval_cmd_passes_limit_and_samples():
+    cmd = runner._eval_cmd(_fake_args(), "A2", 4, "math500")
+    assert "--dataset" in cmd and "math500" in cmd
+    assert "--limit" in cmd and "300" in cmd
+    assert "--n-samples" in cmd and "4" in cmd
+    assert os.path.join("runs", "A2_seed4") in cmd  # checkpoint path
+
+
+def test_eval_cmd_omits_limit_when_none():
+    cmd = runner._eval_cmd(_fake_args(eval_limit=None), "A0", 0, "gsm8k")
+    assert "--limit" not in cmd
